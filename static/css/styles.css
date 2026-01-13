@@ -1,16 +1,16 @@
 /* CSS Variables for theming */
 :root {
-    --bg-primary: #0f1419;
-    --bg-secondary: #1a1f26;
-    --bg-tertiary: #242a33;
-    --text-primary: #e7e9ea;
-    --text-secondary: #8b98a5;
-    --accent-primary: #4a9eff;
-    --accent-secondary: #22c55e;
-    --accent-warning: #f59e0b;
-    --accent-danger: #ef4444;
-    --border-color: #2f3640;
-    --shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-tertiary: #e9ecef;
+    --text-primary: #212529;
+    --text-secondary: #6c757d;
+    --accent-primary: #0d6efd;
+    --accent-secondary: #198754;
+    --accent-warning: #fd7e14;
+    --accent-danger: #dc3545;
+    --border-color: #dee2e6;
+    --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     --radius: 8px;
 }
 

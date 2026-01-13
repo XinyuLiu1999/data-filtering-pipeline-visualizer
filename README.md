@@ -2,6 +2,8 @@
 
 An interactive web-based visualization tool for analyzing and debugging data filtering pipelines used in multimodal LLM pre-training.
 
+![Data Filtering Pipeline Visualizer](dataset-visualizer.png)
+
 ## Features
 
 - **Dataset Loading**: Support for JSON, JSONL, and Parquet files
