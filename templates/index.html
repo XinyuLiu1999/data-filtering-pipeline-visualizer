@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Filtering Pipeline Visualizer</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <h1>Data Filtering Pipeline Visualizer</h1>
+            <div class="header-stats" id="header-stats">
+                <span id="total-samples">No dataset loaded</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Sidebar - Controls -->
+            <aside class="sidebar">
+                <!-- Dataset Loading -->
+                <section class="panel">
+                    <h2>Load Dataset</h2>
+                    <div class="form-group">
+                        <label for="file-path">File Path (JSONL/JSON/Parquet)</label>
+                        <input type="text" id="file-path" placeholder="/path/to/dataset.jsonl">
+                    </div>
+                    <div class="form-group">
+                        <label for="record-limit">Record Limit (optional)</label>
+                        <input type="number" id="record-limit" placeholder="Leave empty for all">
+                    </div>
+                    <button class="btn btn-primary" onclick="loadDataset()">Load Dataset</button>
+                    <div id="load-status" class="status-message"></div>
+                </section>
+
+                <!-- Filtering Rules -->
+                <section class="panel" id="filters-panel" style="display: none;">
+                    <h2>Filtering Rules</h2>
+                    <div class="filter-mode">
+                        <span class="mode-label">Mode:</span>
+                        <span class="mode-badge">AND (all conditions)</span>
+                    </div>
+                    <div id="filters-container"></div>
+                    <button class="btn btn-secondary" onclick="addFilter()">+ Add Filter</button>
+                    <div class="filter-actions">
+                        <button class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
+                        <button class="btn btn-danger" onclick="clearFilters()">Clear All</button>
+                    </div>
+
+                    <!-- Filter Presets -->
+                    <div class="presets-section">
+                        <div class="presets-header">
+                            <span class="presets-title">Presets</span>
+                            <button class="btn-icon btn-refresh" onclick="refreshPresets()" title="Refresh presets"></button>
+                        </div>
+                        <div class="presets-controls">
+                            <select id="preset-select" onchange="onPresetSelect()">
+                                <option value="">-- Load Preset --</option>
+                            </select>
+                            <button class="btn-icon btn-delete" onclick="deleteSelectedPreset()" title="Delete preset"></button>
+                        </div>
+                        <div class="presets-save">
+                            <input type="text" id="preset-name" placeholder="Preset name...">
+                            <button class="btn btn-secondary btn-small" onclick="saveCurrentPreset()">Save</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Export Section -->
+                <section class="panel" id="export-panel" style="display: none;">
+                    <h2>Export Filtered Data</h2>
+                    <div class="export-stats">
+                        <div class="stat-item">
+                            <span class="stat-label">Retained:</span>
+                            <span class="stat-value" id="export-count">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Rate:</span>
+                            <span class="stat-value" id="export-rate">0%</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary" onclick="exportIndices()">Export IDs</button>
+                    <button class="btn btn-secondary" onclick="exportJSON()">Export JSON</button>
+                </section>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="content">
+                <!-- Tab Navigation -->
+                <nav class="tabs">
+                    <button class="tab active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+                    <button class="tab" data-tab="distributions" onclick="switchTab('distributions')">Distributions</button>
+                    <button class="tab" data-tab="correlation" onclick="switchTab('correlation')">Correlation</button>
+                    <button class="tab" data-tab="images" onclick="switchTab('images')">Image Browser</button>
+                </nav>
+
+                <!-- Tab Content -->
+                <div class="tab-content">
+                    <!-- Overview Tab -->
+                    <div id="overview-tab" class="tab-pane active">
+                        <div class="placeholder" id="overview-placeholder">
+                            <h3>Welcome to Data Filtering Pipeline Visualizer</h3>
+                            <p>Load a dataset to get started. This tool helps you:</p>
+                            <ul>
+                                <li>Visualize metric distributions with interactive charts</li>
+                                <li>Define filtering rules with absolute or percentile thresholds</li>
+                                <li>Compare before/after filtering statistics</li>
+                                <li>Identify redundant filters via correlation analysis</li>
+                                <li>Browse and inspect individual samples</li>
+                            </ul>
+                        </div>
+                        <div id="overview-content" style="display: none;">
+                            <!-- Summary Cards -->
+                            <div class="stats-grid" id="overview-stats"></div>
+
+                            <!-- Filter Impact Summary -->
+                            <div class="filter-impact-section" id="filter-impact-section">
+                                <h3>Filtering Impact</h3>
+                                <div class="impact-summary">
+                                    <div class="impact-visual">
+                                        <div class="impact-bar-container">
+                                            <div class="impact-bar-label">
+                                                <span>Before: <strong id="impact-before-count">0</strong></span>
+                                                <span>After: <strong id="impact-after-count">0</strong></span>
+                                            </div>
+                                            <div class="impact-bar">
+                                                <div class="impact-bar-before"></div>
+                                                <div class="impact-bar-after" id="impact-bar-after"></div>
+                                            </div>
+                                            <div class="impact-bar-stats">
+                                                <span class="retained" id="impact-retained">100% retained</span>
+                                                <span class="removed" id="impact-removed">0% removed</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="impact-details" id="impact-details">
+                                        <div class="impact-detail-item">
+                                            <span class="detail-label">Samples Retained</span>
+                                            <span class="detail-value positive" id="detail-retained">0</span>
+                                        </div>
+                                        <div class="impact-detail-item">
+                                            <span class="detail-label">Samples Removed</span>
+                                            <span class="detail-value negative" id="detail-removed">0</span>
+                                        </div>
+                                        <div class="impact-detail-item">
+                                            <span class="detail-label">Active Filters</span>
+                                            <span class="detail-value" id="detail-filters">0</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Before/After Metric Comparison -->
+                            <div class="comparison-section">
+                                <div class="comparison-header">
+                                    <h3>Metric Statistics Comparison</h3>
+                                    <div class="comparison-legend">
+                                        <span class="legend-before"><span class="legend-dot"></span> Before</span>
+                                        <span class="legend-after"><span class="legend-dot"></span> After</span>
+                                    </div>
+                                </div>
+                                <div class="comparison-grid" id="comparison-grid"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Distributions Tab -->
+                    <div id="distributions-tab" class="tab-pane">
+                        <div class="distribution-controls">
+                            <label>
+                                <input type="checkbox" id="show-filtered" checked onchange="updateAllDistributions()">
+                                Show before/after comparison
+                            </label>
+                            <span class="distribution-legend">
+                                <span class="legend-item"><span class="legend-color before"></span> Before filtering</span>
+                                <span class="legend-item"><span class="legend-color after"></span> After filtering</span>
+                            </span>
+                        </div>
+                        <div class="distributions-grid" id="distributions-grid"></div>
+                    </div>
+
+                    <!-- Correlation Tab -->
+                    <div id="correlation-tab" class="tab-pane">
+                        <div class="correlation-controls">
+                            <label>Select metrics for correlation:</label>
+                            <div id="correlation-checkboxes"></div>
+                            <button class="btn btn-secondary" onclick="updateCorrelation()">Update Matrix</button>
+                        </div>
+                        <div id="correlation-chart"></div>
+                        <div class="correlation-insights" id="correlation-insights"></div>
+                    </div>
+
+                    <!-- Images Tab -->
+                    <div id="images-tab" class="tab-pane">
+                        <div class="image-filter-status" id="image-filter-status">
+                            <span class="filter-status-text">
+                                <strong id="image-showing-count">0</strong> images retained,
+                                <strong id="image-filtered-out-count">0</strong> filtered out
+                            </span>
+                            <span class="filter-status-badge" id="filter-status-badge">No filters applied</span>
+                        </div>
+
+                        <!-- Sub-tabs for Retained vs Filtered Out -->
+                        <div class="image-sub-tabs">
+                            <button class="image-sub-tab active" data-view="retained" onclick="switchImageView('retained')">
+                                Retained Images <span class="count-badge" id="retained-badge">0</span>
+                            </button>
+                            <button class="image-sub-tab" data-view="filtered-out" onclick="switchImageView('filtered-out')">
+                                Filtered Out <span class="count-badge" id="filtered-out-badge">0</span>
+                            </button>
+                        </div>
+
+                        <div class="image-controls">
+                            <div class="control-group">
+                                <label for="sort-column">Sort by:</label>
+                                <select id="sort-column">
+                                    <option value="">Default Order</option>
+                                </select>
+                                <select id="sort-order">
+                                    <option value="asc">Ascending</option>
+                                    <option value="desc">Descending</option>
+                                </select>
+                            </div>
+                            <div class="control-group">
+                                <label for="per-page">Per page:</label>
+                                <select id="per-page" onchange="loadCurrentImageView()">
+                                    <option value="20">20</option>
+                                    <option value="50" selected>50</option>
+                                    <option value="100">100</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-primary" onclick="loadCurrentImageView()">Refresh</button>
+                        </div>
+                        <div class="image-grid" id="image-grid"></div>
+                        <div class="pagination" id="pagination"></div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Image Detail Modal -->
+    <div class="modal" id="image-modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <div class="modal-body">
+                <div class="modal-image-container">
+                    <img id="modal-image" src="" alt="Sample image">
+                </div>
+                <div class="modal-details">
+                    <h3>Sample Details</h3>
+                    <div id="modal-metadata"></div>
+                    <h4>Metric Values</h4>
+                    <div id="modal-metrics"></div>
+                    <h4>Percentile Ranks</h4>
+                    <div id="modal-percentiles"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
