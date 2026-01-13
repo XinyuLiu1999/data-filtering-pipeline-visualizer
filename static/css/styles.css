@@ -1345,11 +1345,16 @@ select:focus {
 
 .presets-save {
     display: flex;
+    flex-direction: column;
     gap: 0.5rem;
 }
 
 .presets-save input {
-    flex: 1;
+    width: 100%;
+}
+
+.presets-save .btn {
+    width: 100%;
 }
 
 .btn-icon {
@@ -1371,11 +1376,11 @@ select:focus {
 }
 
 .btn-icon.btn-refresh::before {
-    content: "\\21BB";
+    content: "↻";
 }
 
 .btn-icon.btn-delete::before {
-    content: "\\2715";
+    content: "✕";
 }
 
 .btn-icon.btn-delete:hover {
