@@ -1,3 +1,13 @@
+---
+title: Data Filtering Pipeline Visualizer
+emoji: 📊
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Data Filtering Pipeline Visualizer
 
 An interactive web-based visualization tool for analyzing and debugging data filtering pipelines used in multimodal LLM pre-training.
