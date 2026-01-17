@@ -9,14 +9,17 @@ import os
 import json
 import numpy as np
 import pandas as pd
-from flask import Flask, render_template, jsonify, request, send_file, Response
+from flask import Flask, render_template, jsonify, request, Response, redirect
 from flask_cors import CORS
 from pathlib import Path
-import mimetypes
 from functools import lru_cache
 import hashlib
 
 app = Flask(__name__)
+
+# HuggingFace dataset configuration for serving images
+HF_DATASET_REPO = "XinyuLiu1999/cc3m-filtered"
+HF_DATASET_IMAGE_FOLDER = "images"  # Folder within the dataset containing images
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Disable strict slashes to avoid redirects
@@ -571,19 +574,15 @@ def get_filtered_out_images():
 
 @app.route('/api/image/<path:image_path>')
 def serve_image(image_path):
-    """Serve an image from the filesystem."""
-    # Handle both absolute and relative paths
-    if not image_path.startswith('/'):
-        image_path = '/' + image_path
+    """Redirect to HuggingFace dataset URL for the image."""
+    # Extract the filename from the path (e.g., "000057623.jpg" from full path)
+    filename = os.path.basename(image_path)
 
-    if not os.path.exists(image_path):
-        return jsonify({'error': 'Image not found'}), 404
+    # Construct HuggingFace dataset URL
+    # Format: https://huggingface.co/datasets/{repo}/resolve/main/{folder}/{filename}
+    hf_url = f"https://huggingface.co/datasets/{HF_DATASET_REPO}/resolve/main/{HF_DATASET_IMAGE_FOLDER}/{filename}"
 
-    try:
-        mimetype = mimetypes.guess_type(image_path)[0] or 'image/jpeg'
-        return send_file(image_path, mimetype=mimetype)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return redirect(hf_url)
 
 
 @app.route('/api/sample/<int:index>')
