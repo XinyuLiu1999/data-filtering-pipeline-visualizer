@@ -85,20 +85,44 @@ def load_hf_dataset(repo_id, split="train", config=None, limit=None):
     """Load dataset from HuggingFace Hub into pandas DataFrame.
 
     Supports both:
-    1. Standard HuggingFace Datasets format (with dataset card)
-    2. Raw JSONL files in HuggingFace repos (metadata.jsonl)
+    1. Raw JSONL files in HuggingFace repos (metadata.jsonl) - tried first for speed
+    2. Standard HuggingFace Datasets format (with dataset card)
     """
+    from huggingface_hub import hf_hub_download, list_repo_files
+
     # Ensure limit is an integer if provided
     if limit is not None:
         limit = int(limit)
 
-    # First, try to load as a standard HuggingFace dataset
+    errors = []
+
+    # First, try to download metadata.jsonl directly (fastest method)
+    try:
+        file_path = hf_hub_download(
+            repo_id=repo_id,
+            filename="metadata.jsonl",
+            repo_type="dataset"
+        )
+        df = load_jsonl(file_path, limit)
+        return df
+    except Exception as e:
+        errors.append(f"Direct JSONL download: {str(e)}")
+
+    # If no metadata.jsonl, try standard HuggingFace dataset loading
     try:
         from datasets import load_dataset
         if config:
-            dataset = load_dataset(repo_id, config, split=split)
+            dataset = load_dataset(repo_id, config, split=split, trust_remote_code=True)
         else:
-            dataset = load_dataset(repo_id, split=split)
+            dataset = load_dataset(repo_id, split=split, trust_remote_code=True)
+
+        # If it's a DatasetDict, try to get the requested split or first available
+        if hasattr(dataset, 'keys'):
+            available_splits = list(dataset.keys())
+            if split in available_splits:
+                dataset = dataset[split]
+            elif available_splits:
+                dataset = dataset[available_splits[0]]
 
         # Convert to pandas DataFrame
         if limit:
@@ -107,27 +131,10 @@ def load_hf_dataset(repo_id, split="train", config=None, limit=None):
         df = dataset.to_pandas()
         return df
     except Exception as e:
-        # If standard loading fails, try loading as raw JSONL from the repo
-        pass
+        errors.append(f"Standard dataset load: {str(e)}")
 
-    # Try to load metadata.jsonl directly from the repo
-    try:
-        from huggingface_hub import hf_hub_download
-
-        # Download the metadata.jsonl file
-        file_path = hf_hub_download(
-            repo_id=repo_id,
-            filename="metadata.jsonl",
-            repo_type="dataset"
-        )
-
-        # Load the JSONL file
-        df = load_jsonl(file_path, limit)
-        return df
-    except Exception as e2:
-        raise Exception(f"Failed to load dataset '{repo_id}'. "
-                       f"Not a valid HuggingFace dataset and no metadata.jsonl found. "
-                       f"Error: {str(e2)}")
+    raise Exception(f"Failed to load dataset '{repo_id}'. Tried:\n" +
+                   "\n".join(f"  - {err}" for err in errors))
 
 
 def detect_numeric_columns(df):
