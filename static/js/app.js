@@ -1176,4 +1176,4 @@ document.getElementById('image-modal').addEventListener('click', function(e) {
 // ============== Initialize ==============
 
 // Set default file path from example
-document.getElementById('file-path').value = '/cephfs/liuxinyu/cc3m-parquet/cc3m-first50-merged.jsonl';
+document.getElementById('file-path').value = '/cephfs/liuxinyu/my_dj/scripts/cc3m-last25-merged.jsonl';
