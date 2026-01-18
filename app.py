@@ -709,12 +709,18 @@ def get_filtered_out_images():
 @app.route('/api/image/<path:image_path>')
 def serve_image(image_path):
     """Redirect to HuggingFace dataset URL for the image."""
-    # Extract the filename from the path (e.g., "000057623.jpg" from full path)
-    filename = os.path.basename(image_path)
+    # The image_path may be:
+    # 1. Just a filename: "000057623.jpg"
+    # 2. A relative path: "cc3m-train-0000/000057623.jpg"
+    # 3. A full path including the images folder: "images/cc3m-train-0000/000057623.jpg"
+
+    # Remove leading "images/" if present (it will be added back via HF_DATASET_IMAGE_FOLDER)
+    if image_path.startswith('images/'):
+        image_path = image_path[7:]  # Remove "images/" prefix
 
     # Construct HuggingFace dataset URL
-    # Format: https://huggingface.co/datasets/{repo}/resolve/main/{folder}/{filename}
-    hf_url = f"https://huggingface.co/datasets/{HF_DATASET_REPO}/resolve/main/{HF_DATASET_IMAGE_FOLDER}/{filename}"
+    # Format: https://huggingface.co/datasets/{repo}/resolve/main/{folder}/{path}
+    hf_url = f"https://huggingface.co/datasets/{HF_DATASET_REPO}/resolve/main/{HF_DATASET_IMAGE_FOLDER}/{image_path}"
 
     return redirect(hf_url)
 
