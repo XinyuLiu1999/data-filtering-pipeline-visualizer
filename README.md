@@ -6,7 +6,7 @@ colorTo: purple
 sdk: docker
 app_port: 7860
 pinned: false
-models:
+datasets:
 - XinyuLiu1999/cc3m-filtered
 ---
 
