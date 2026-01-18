@@ -17,4 +17,6 @@ RUN mkdir -p presets logs
 EXPOSE 7860
 
 # Run with gunicorn
-CMD ["gunicorn", "-b", "0.0.0.0:7860", "-w", "2", "--timeout", "300", "app:app"]
+# Use single worker (-w 1) because app stores dataset in memory (global state)
+# Multiple workers would cause "No dataset loaded" errors as each worker has separate memory
+CMD ["gunicorn", "-b", "0.0.0.0:7860", "-w", "1", "--threads", "4", "--timeout", "300", "app:app"]

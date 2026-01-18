@@ -824,7 +824,11 @@ function initializeSortSelector() {
 }
 
 async function loadImages(page = 1) {
-    if (!state.loaded) return;
+    if (!state.loaded) {
+        document.getElementById('image-grid').innerHTML =
+            '<div class="placeholder"><p>Please load a dataset first to view images.</p></div>';
+        return;
+    }
 
     state.currentPage = page;
     // Use applied filters (from "Apply Filters" button) instead of current DOM values
@@ -994,7 +998,11 @@ function loadCurrentImageView() {
 }
 
 async function loadFilteredOutImages(page = 1) {
-    if (!state.loaded) return;
+    if (!state.loaded) {
+        document.getElementById('image-grid').innerHTML =
+            '<div class="placeholder"><p>Please load a dataset first to view images.</p></div>';
+        return;
+    }
 
     state.currentPage = page;
     const filters = state.appliedFilters;
