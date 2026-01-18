@@ -18,31 +18,89 @@ const state = {
     filteredOutCount: 0,  // Count of images filtered out
     currentPage: 1,
     currentImageView: 'retained',  // 'retained' or 'filtered-out'
-    histograms: {}
+    histograms: {},
+    dataSource: 'huggingface'  // 'huggingface' or 'local'
 };
 
 // API base URL
 const API_BASE = '';
 
+// ============== Data Source Switching ==============
+
+function switchDataSource(source) {
+    state.dataSource = source;
+
+    // Update tab styling
+    document.querySelectorAll('.source-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.source === source);
+    });
+
+    // Show/hide source content
+    document.getElementById('hf-source').style.display = source === 'huggingface' ? 'block' : 'none';
+    document.getElementById('local-source').style.display = source === 'local' ? 'block' : 'none';
+}
+
+async function loadDefaultDataset() {
+    try {
+        showStatus('load-status', 'Fetching default dataset info...', '');
+
+        const response = await fetch(`${API_BASE}/api/default-dataset`);
+        const data = await response.json();
+
+        if (data.repo_id) {
+            document.getElementById('hf-repo').value = data.repo_id;
+            document.getElementById('hf-split').value = data.split || 'train';
+            document.getElementById('hf-config').value = data.config || '';
+
+            // Set a reasonable default limit for demo
+            document.getElementById('record-limit').value = '1000';
+
+            showStatus('load-status', 'Default dataset configured. Click "Load Dataset" to load.', 'success');
+        }
+    } catch (error) {
+        showStatus('load-status', 'Failed to fetch default dataset info', 'error');
+    }
+}
+
 // ============== Data Loading ==============
 
 async function loadDataset() {
-    const filePath = document.getElementById('file-path').value.trim();
     const limitInput = document.getElementById('record-limit').value;
     const limit = limitInput ? parseInt(limitInput) : null;
 
-    if (!filePath) {
-        showStatus('load-status', 'Please enter a file path', 'error');
-        return;
+    let endpoint, body;
+
+    if (state.dataSource === 'huggingface') {
+        const repoId = document.getElementById('hf-repo').value.trim();
+        const split = document.getElementById('hf-split').value.trim() || 'train';
+        const config = document.getElementById('hf-config').value.trim() || null;
+
+        if (!repoId) {
+            showStatus('load-status', 'Please enter a HuggingFace dataset repository', 'error');
+            return;
+        }
+
+        endpoint = `${API_BASE}/api/load-hf`;
+        body = { repo_id: repoId, split, config, limit };
+    } else {
+        const filePath = document.getElementById('file-path').value.trim();
+
+        if (!filePath) {
+            showStatus('load-status', 'Please enter a file path', 'error');
+            return;
+        }
+
+        endpoint = `${API_BASE}/api/load`;
+        body = { file_path: filePath, limit };
     }
 
     showStatus('load-status', 'Loading dataset...', '');
 
     try {
-        const response = await fetch(`${API_BASE}/api/load`, {
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ file_path: filePath, limit })
+            body: JSON.stringify(body)
         });
 
         const data = await response.json();
@@ -63,7 +121,8 @@ async function loadDataset() {
         state.filteredCount = data.total_records;
 
         // Update UI
-        showStatus('load-status', `Loaded ${data.total_records.toLocaleString()} records`, 'success');
+        const sourceInfo = data.source === 'huggingface' ? ` from ${data.repo_id}` : '';
+        showStatus('load-status', `Loaded ${data.total_records.toLocaleString()} records${sourceInfo}`, 'success');
         document.getElementById('header-stats').innerHTML =
             `<span id="total-samples">${data.total_records.toLocaleString()} samples | ${data.numeric_columns.length} metrics</span>`;
 

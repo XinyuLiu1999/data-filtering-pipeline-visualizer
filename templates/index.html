@@ -25,9 +25,38 @@
                 <section class="panel">
                     <h2>Load Dataset</h2>
                     <div class="form-group">
-                        <label for="file-path">File Path (JSONL/JSON/Parquet)</label>
-                        <input type="text" id="file-path" placeholder="/path/to/dataset.jsonl">
+                        <label>Source:</label>
+                        <div class="source-tabs">
+                            <button class="source-tab active" data-source="huggingface" onclick="switchDataSource('huggingface')">HuggingFace</button>
+                            <button class="source-tab" data-source="local" onclick="switchDataSource('local')">Local File</button>
+                        </div>
                     </div>
+
+                    <!-- HuggingFace Dataset Input -->
+                    <div id="hf-source" class="source-content active">
+                        <div class="form-group">
+                            <label for="hf-repo">Dataset Repository</label>
+                            <input type="text" id="hf-repo" placeholder="username/dataset-name">
+                        </div>
+                        <div class="form-group">
+                            <label for="hf-split">Split</label>
+                            <input type="text" id="hf-split" value="train" placeholder="train">
+                        </div>
+                        <div class="form-group">
+                            <label for="hf-config">Config (optional)</label>
+                            <input type="text" id="hf-config" placeholder="Leave empty for default">
+                        </div>
+                        <button class="btn btn-secondary btn-small" onclick="loadDefaultDataset()">Load Demo Dataset</button>
+                    </div>
+
+                    <!-- Local File Input -->
+                    <div id="local-source" class="source-content" style="display: none;">
+                        <div class="form-group">
+                            <label for="file-path">File Path (JSONL/JSON/Parquet)</label>
+                            <input type="text" id="file-path" placeholder="/path/to/dataset.jsonl">
+                        </div>
+                    </div>
+
                     <div class="form-group">
                         <label for="record-limit">Record Limit (optional)</label>
                         <input type="number" id="record-limit" placeholder="Leave empty for all">

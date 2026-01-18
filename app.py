@@ -18,8 +18,14 @@ import hashlib
 app = Flask(__name__)
 
 # HuggingFace dataset configuration for serving images
-HF_DATASET_REPO = "XinyuLiu1999/cc3m-filtered"
-HF_DATASET_IMAGE_FOLDER = "images"  # Folder within the dataset containing images
+HF_DATASET_REPO = os.environ.get("HF_DATASET_REPO", "XinyuLiu1999/cc3m-filtered")
+HF_DATASET_IMAGE_FOLDER = os.environ.get("HF_DATASET_IMAGE_FOLDER", "images")
+
+# Default demo dataset for HuggingFace Spaces
+# This dataset will be loaded automatically if available on HF Spaces
+DEFAULT_HF_DATASET = os.environ.get("DEFAULT_HF_DATASET", "XinyuLiu1999/cc3m-filtered")
+DEFAULT_HF_DATASET_SPLIT = os.environ.get("DEFAULT_HF_DATASET_SPLIT", "train")
+DEFAULT_HF_DATASET_CONFIG = os.environ.get("DEFAULT_HF_DATASET_CONFIG", None)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Disable strict slashes to avoid redirects
@@ -73,6 +79,55 @@ def load_parquet(file_path, limit=None):
     if limit:
         df = df.head(limit)
     return df
+
+
+def load_hf_dataset(repo_id, split="train", config=None, limit=None):
+    """Load dataset from HuggingFace Hub into pandas DataFrame.
+
+    Supports both:
+    1. Standard HuggingFace Datasets format (with dataset card)
+    2. Raw JSONL files in HuggingFace repos (metadata.jsonl)
+    """
+    # Ensure limit is an integer if provided
+    if limit is not None:
+        limit = int(limit)
+
+    # First, try to load as a standard HuggingFace dataset
+    try:
+        from datasets import load_dataset
+        if config:
+            dataset = load_dataset(repo_id, config, split=split)
+        else:
+            dataset = load_dataset(repo_id, split=split)
+
+        # Convert to pandas DataFrame
+        if limit:
+            dataset = dataset.select(range(min(limit, len(dataset))))
+
+        df = dataset.to_pandas()
+        return df
+    except Exception as e:
+        # If standard loading fails, try loading as raw JSONL from the repo
+        pass
+
+    # Try to load metadata.jsonl directly from the repo
+    try:
+        from huggingface_hub import hf_hub_download
+
+        # Download the metadata.jsonl file
+        file_path = hf_hub_download(
+            repo_id=repo_id,
+            filename="metadata.jsonl",
+            repo_type="dataset"
+        )
+
+        # Load the JSONL file
+        df = load_jsonl(file_path, limit)
+        return df
+    except Exception as e2:
+        raise Exception(f"Failed to load dataset '{repo_id}'. "
+                       f"Not a valid HuggingFace dataset and no metadata.jsonl found. "
+                       f"Error: {str(e2)}")
 
 
 def detect_numeric_columns(df):
@@ -341,6 +396,78 @@ def load_dataset():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/load-hf', methods=['POST'])
+def load_hf_dataset_endpoint():
+    """Load a dataset from HuggingFace Hub."""
+    data = request.json
+    repo_id = data.get('repo_id')
+    split = data.get('split', 'train')
+    config = data.get('config')
+    limit = data.get('limit')
+
+    if not repo_id:
+        return jsonify({'error': 'No HuggingFace dataset repo_id provided'}), 400
+
+    try:
+        df = load_hf_dataset(repo_id, split=split, config=config, limit=limit)
+
+        # Detect numeric columns
+        numeric_cols = detect_numeric_columns(df)
+
+        # Compute percentiles and stats
+        percentiles = compute_percentiles(df, numeric_cols)
+        stats = compute_stats(df, numeric_cols)
+
+        # Update global state
+        dataset_state['df'] = df
+        dataset_state['file_path'] = f"hf://{repo_id}"
+        dataset_state['numeric_columns'] = numeric_cols
+        dataset_state['percentiles'] = percentiles
+        dataset_state['stats'] = stats
+
+        # Detect image path column
+        image_column = None
+        for col in ['images', 'image', 'image_path', 'img_path', 'path']:
+            if col in df.columns:
+                image_column = col
+                break
+
+        # Detect ID column
+        id_column = None
+        for col in ['id', 'uid', 'uuid', 'index', 'idx']:
+            if col in df.columns:
+                id_column = col
+                break
+
+        return jsonify({
+            'success': True,
+            'total_records': len(df),
+            'numeric_columns': numeric_cols,
+            'all_columns': df.columns.tolist(),
+            'image_column': image_column,
+            'id_column': id_column,
+            'percentiles': percentiles,
+            'stats': stats,
+            'source': 'huggingface',
+            'repo_id': repo_id
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/default-dataset')
+def get_default_dataset():
+    """Get the default HuggingFace dataset configuration for demo purposes."""
+    return jsonify({
+        'repo_id': DEFAULT_HF_DATASET,
+        'split': DEFAULT_HF_DATASET_SPLIT,
+        'config': DEFAULT_HF_DATASET_CONFIG,
+        'image_repo': HF_DATASET_REPO,
+        'image_folder': HF_DATASET_IMAGE_FOLDER
+    })
 
 
 @app.route('/api/stats')
