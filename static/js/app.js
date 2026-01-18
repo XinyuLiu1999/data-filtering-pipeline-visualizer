@@ -152,6 +152,28 @@ function showStatus(elementId, message, type) {
     element.className = 'status-message' + (type ? ` ${type}` : '');
 }
 
+// ============== Image Error Handling ==============
+
+const NO_IMAGE_PLACEHOLDER = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22><rect fill=%22%23242a33%22 width=%22200%22 height=%22150%22/><text fill=%22%238b98a5%22 x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22>No Image</text></svg>';
+
+function handleImageError(img) {
+    const retryCount = parseInt(img.dataset.retry || '0');
+    const maxRetries = 2;
+
+    if (retryCount < maxRetries) {
+        // Retry loading the image after a short delay
+        img.dataset.retry = retryCount + 1;
+        setTimeout(() => {
+            // Add cache-busting parameter to force reload
+            const originalSrc = img.dataset.originalSrc;
+            img.src = originalSrc + (originalSrc.includes('?') ? '&' : '?') + '_retry=' + Date.now();
+        }, 500 * (retryCount + 1)); // Increasing delay: 500ms, 1000ms
+    } else {
+        // After max retries, show placeholder
+        img.src = NO_IMAGE_PLACEHOLDER;
+    }
+}
+
 // ============== Filters ==============
 
 function initializeFilters() {
@@ -934,8 +956,8 @@ function renderImageGrid(images, isFilteredOut = false) {
         return `
             <div class="${cardClass}" onclick="openImageModal(${img._index})">
                 ${isFilteredOut ? '<div class="filtered-out-badge">Filtered Out</div>' : ''}
-                <img src="/api/image/${imagePath}" alt="${id}" loading="lazy"
-                     onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22><rect fill=%22%23242a33%22 width=%22200%22 height=%22150%22/><text fill=%22%238b98a5%22 x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22>No Image</text></svg>'">
+                <img src="/api/image/${imagePath}" alt="${id}" loading="lazy" data-retry="0" data-original-src="/api/image/${imagePath}"
+                     onerror="handleImageError(this)">
                 <div class="image-card-info">
                     <div class="image-card-id">ID: ${id}</div>
                     <div class="image-card-metrics">${metricBadges}</div>
