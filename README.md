@@ -8,6 +8,7 @@ app_port: 7860
 pinned: false
 datasets:
 - XinyuLiu1999/cc3m-filtered
+- XinyuLiu1999/TextAtlas5M_CoverBook_test
 ---
 
 # Data Filtering Pipeline Visualizer
