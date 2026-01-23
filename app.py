@@ -37,7 +37,8 @@ dataset_state = {
     'file_path': None,
     'numeric_columns': [],
     'percentiles': {},
-    'stats': {}
+    'stats': {},
+    'repo_id': None  # Track the HuggingFace repo ID for dynamic image serving
 }
 
 
@@ -375,6 +376,7 @@ def load_dataset():
         dataset_state['numeric_columns'] = numeric_cols
         dataset_state['percentiles'] = percentiles
         dataset_state['stats'] = stats
+        dataset_state['repo_id'] = None  # Clear repo_id for local files
 
         # Detect image path column
         image_column = None
@@ -433,6 +435,7 @@ def load_hf_dataset_endpoint():
         dataset_state['numeric_columns'] = numeric_cols
         dataset_state['percentiles'] = percentiles
         dataset_state['stats'] = stats
+        dataset_state['repo_id'] = repo_id  # Store repo_id for dynamic image serving
 
         # Detect image path column
         image_column = None
@@ -714,13 +717,17 @@ def serve_image(image_path):
     # 2. A relative path: "cc3m-train-0000/000057623.jpg"
     # 3. A full path including the images folder: "images/cc3m-train-0000/000057623.jpg"
 
+    # Determine which repo to use for images
+    # If a HuggingFace dataset is loaded, use that repo; otherwise fall back to env variable
+    repo_id = dataset_state.get('repo_id') or HF_DATASET_REPO
+
     # Remove leading "images/" if present (it will be added back via HF_DATASET_IMAGE_FOLDER)
     if image_path.startswith('images/'):
         image_path = image_path[7:]  # Remove "images/" prefix
 
     # Construct HuggingFace dataset URL
     # Format: https://huggingface.co/datasets/{repo}/resolve/main/{folder}/{path}
-    hf_url = f"https://huggingface.co/datasets/{HF_DATASET_REPO}/resolve/main/{HF_DATASET_IMAGE_FOLDER}/{image_path}"
+    hf_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{HF_DATASET_IMAGE_FOLDER}/{image_path}"
 
     return redirect(hf_url)
 
