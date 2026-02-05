@@ -1134,15 +1134,42 @@ select:focus {
 
 .detail-key {
     color: var(--text-secondary);
+    min-width: 35%;
     max-width: 40%;
     word-break: break-word;
+    flex-shrink: 0;
 }
 
 .detail-value {
     color: var(--text-primary);
-    text-align: right;
-    max-width: 55%;
+    text-align: left;
+    max-width: 60%;
     word-break: break-word;
+    max-height: 150px;
+    overflow-y: auto;
+    overflow-x: auto;
+    padding-right: 4px;
+    white-space: pre-wrap;
+    font-family: inherit;
+}
+
+.detail-value::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.detail-value::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+    border-radius: 3px;
+}
+
+.detail-value::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+.detail-value::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
 }
 
 .percentile-bar {
