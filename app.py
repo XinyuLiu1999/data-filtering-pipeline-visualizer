@@ -712,22 +712,18 @@ def get_filtered_out_images():
 @app.route('/api/image/<path:image_path>')
 def serve_image(image_path):
     """Redirect to HuggingFace dataset URL for the image."""
-    # The image_path may be:
-    # 1. Just a filename: "000057623.jpg"
-    # 2. A relative path: "cc3m-train-0000/000057623.jpg"
-    # 3. A full path including the images folder: "images/cc3m-train-0000/000057623.jpg"
+    # The image_path comes directly from the dataset metadata and should be
+    # used as-is since it contains the correct relative path from repo root.
+    # Examples:
+    # - TextAtlas5M-test: "TextAtlas5M_merged/chunk_000000/file.jpg"
+    # - cc3m-filtered: "images/cc3m-train-0010/file.jpg"
 
     # Determine which repo to use for images
     # If a HuggingFace dataset is loaded, use that repo; otherwise fall back to env variable
     repo_id = dataset_state.get('repo_id') or HF_DATASET_REPO
 
-    # Remove leading "images/" if present (it will be added back via HF_DATASET_IMAGE_FOLDER)
-    if image_path.startswith('images/'):
-        image_path = image_path[7:]  # Remove "images/" prefix
-
-    # Construct HuggingFace dataset URL
-    # Format: https://huggingface.co/datasets/{repo}/resolve/main/{folder}/{path}
-    hf_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{HF_DATASET_IMAGE_FOLDER}/{image_path}"
+    # Construct HuggingFace dataset URL using the path directly from metadata
+    hf_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{image_path}"
 
     return redirect(hf_url)
 
