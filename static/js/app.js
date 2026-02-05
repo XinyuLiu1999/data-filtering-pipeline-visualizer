@@ -1112,8 +1112,7 @@ async function openImageModal(index) {
             .map(col => {
                 let val = data[col];
                 if (val === null || val === undefined) val = 'N/A';
-                if (typeof val === 'object') val = JSON.stringify(val);
-                if (typeof val === 'string' && val.length > 100) val = val.substring(0, 100) + '...';
+                if (typeof val === 'object') val = JSON.stringify(val, null, 2);
                 return `
                     <div class="detail-row">
                         <span class="detail-key">${col}</span>
