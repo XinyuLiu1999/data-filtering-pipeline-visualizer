@@ -6,6 +6,7 @@ large-scale datasets used in multimodal LLM pre-training.
 """
 
 import os
+import io
 import json
 import numpy as np
 import pandas as pd
@@ -28,7 +29,10 @@ dataset_state = {
     'file_path': None,
     'numeric_columns': [],
     'percentiles': {},
-    'stats': {}
+    'stats': {},
+    'has_image_bytes': False,       # Whether dataset has binary image data
+    'image_bytes_column': None,     # Column name containing binary image data
+    'image_name_column': None       # Column name containing image names (for display)
 }
 
 
@@ -72,12 +76,130 @@ def load_parquet(file_path, limit=None):
     return df
 
 
+def _extract_binary_element(val):
+    """Extract raw bytes from a value that may be bytes, or a list/ndarray of bytes.
+
+    Parquet list<binary> columns are loaded as ndarray([b'...']) by pandas.
+    This function unwraps that to get the actual bytes.
+    Returns bytes if found, None otherwise.
+    """
+    if isinstance(val, (bytes, bytearray)):
+        return bytes(val)
+    # Handle ndarray or list containing bytes (from parquet list<binary>)
+    if isinstance(val, (list, np.ndarray)):
+        if len(val) > 0:
+            inner = val[0]
+            if isinstance(inner, (bytes, bytearray)):
+                return bytes(inner)
+    return None
+
+
+def _check_col_has_binary(df, col):
+    """Check if a column contains binary image data (possibly nested in arrays)."""
+    non_null = df[col].dropna()
+    if len(non_null) == 0:
+        return False
+    first_valid = non_null.iloc[0]
+    return _extract_binary_element(first_valid) is not None
+
+
+def detect_image_bytes_column(df):
+    """Detect columns containing binary image data in a DataFrame.
+
+    Handles both flat binary columns and parquet list<binary> columns
+    (which pandas loads as ndarray of bytes).
+
+    Returns (image_bytes_col, image_name_col) or (None, None) if not found.
+    """
+    image_bytes_col = None
+    image_name_col = None
+
+    # Check for common binary image column names
+    bytes_candidates = ['image_bytes', 'img_bytes', 'image_data', 'img_data',
+                        'image_binary', 'img_binary', 'bytes']
+    for col in bytes_candidates:
+        if col in df.columns:
+            if _check_col_has_binary(df, col):
+                image_bytes_col = col
+                break
+
+    if image_bytes_col is None:
+        # Fallback: scan all object columns for binary data
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                if _check_col_has_binary(df, col):
+                    image_bytes_col = col
+                    break
+
+    # If we found an image_bytes column, look for image name column
+    if image_bytes_col:
+        name_candidates = ['images', 'image', 'image_name', 'img_name',
+                           'image_path', 'img_path', 'filename', 'file_name', 'name']
+        for col in name_candidates:
+            if col in df.columns and col != image_bytes_col:
+                image_name_col = col
+                break
+
+    return image_bytes_col, image_name_col
+
+
+def guess_image_mimetype(data):
+    """Guess the MIME type of binary image data from its magic bytes."""
+    if data[:3] == b'\xff\xd8\xff':
+        return 'image/jpeg'
+    elif data[:8] == b'\x89PNG\r\n\x1a\n':
+        return 'image/png'
+    elif data[:6] in (b'GIF87a', b'GIF89a'):
+        return 'image/gif'
+    elif data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return 'image/webp'
+    elif data[:4] == b'\x00\x00\x01\x00':
+        return 'image/x-icon'
+    elif data[:2] == b'BM':
+        return 'image/bmp'
+    return 'image/jpeg'  # Default fallback
+
+
+# Sentinel object to signal a value should be skipped during serialization
+_SKIP_SENTINEL = object()
+
+
+def _serialize_value(val):
+    """Serialize a DataFrame cell value to a JSON-compatible type.
+
+    Handles numpy arrays (from parquet list<T> columns), bytes, numpy scalars, etc.
+    Returns _SKIP_SENTINEL for binary data that should be excluded.
+    """
+    # Handle numpy arrays (from parquet list<T> columns like list<string>, list<binary>)
+    if isinstance(val, np.ndarray):
+        # Check if array contains binary data
+        if len(val) > 0 and isinstance(val[0], (bytes, bytearray)):
+            return _SKIP_SENTINEL
+        # Convert to Python list for JSON serialization
+        return val.tolist()
+    if isinstance(val, (list, dict)):
+        return val
+    if isinstance(val, (bytes, bytearray)):
+        return _SKIP_SENTINEL
+    # Scalar NA check
+    if np.isscalar(val) or val is None:
+        try:
+            if pd.isna(val):
+                return None
+        except (TypeError, ValueError):
+            pass
+    if isinstance(val, (np.integer, np.floating)):
+        return float(val) if isinstance(val, np.floating) else int(val)
+    return str(val)
+
+
 def detect_numeric_columns(df):
     """Detect numeric columns suitable for filtering."""
     # Columns to skip - these should never be converted to numeric
     skip_patterns = ['id', 'text', 'caption', 'url', 'path', 'image', 'name',
                      'description', 'title', 'content', 'source', 'exif',
-                     'status', 'error', 'message', 'data_source']
+                     'status', 'error', 'message', 'data_source',
+                     'bytes', 'binary', 'blob']
 
     # First, try to convert object columns that might be numeric
     # But skip columns that contain lists, dicts, text, or IDs
@@ -92,8 +214,8 @@ def detect_numeric_columns(df):
             # Check first non-null value to see if it's a scalar string
             first_valid = df[col].dropna().iloc[0] if len(df[col].dropna()) > 0 else None
             if first_valid is not None:
-                # Skip columns with list/dict values
-                if isinstance(first_valid, (list, dict)):
+                # Skip columns with list/dict/bytes/ndarray values
+                if isinstance(first_valid, (list, dict, bytes, bytearray, np.ndarray)):
                     continue
                 # Skip columns where the first value looks like text (contains spaces or letters)
                 if isinstance(first_valid, str):
@@ -297,6 +419,12 @@ def load_dataset():
         else:
             return jsonify({'error': f'Unsupported file format: {ext}'}), 400
 
+        # Detect binary image data columns (e.g., from parquet files)
+        image_bytes_col, image_name_col = detect_image_bytes_column(df)
+        dataset_state['has_image_bytes'] = image_bytes_col is not None
+        dataset_state['image_bytes_column'] = image_bytes_col
+        dataset_state['image_name_column'] = image_name_col
+
         # Detect numeric columns
         numeric_cols = detect_numeric_columns(df)
 
@@ -313,10 +441,15 @@ def load_dataset():
 
         # Detect image path column
         image_column = None
-        for col in ['images', 'image', 'image_path', 'img_path', 'path']:
-            if col in df.columns:
-                image_column = col
-                break
+        if image_bytes_col:
+            # When we have binary image data, use the name column for display
+            # and signal to the frontend that images come from binary data
+            image_column = image_name_col or image_bytes_col
+        else:
+            for col in ['images', 'image', 'image_path', 'img_path', 'path']:
+                if col in df.columns:
+                    image_column = col
+                    break
 
         # Detect ID column
         id_column = None
@@ -325,15 +458,20 @@ def load_dataset():
                 id_column = col
                 break
 
+        # Build list of columns to expose (exclude binary data columns)
+        exposed_columns = [col for col in df.columns.tolist()
+                           if col != image_bytes_col]
+
         return jsonify({
             'success': True,
             'total_records': len(df),
             'numeric_columns': numeric_cols,
-            'all_columns': df.columns.tolist(),
+            'all_columns': exposed_columns,
             'image_column': image_column,
             'id_column': id_column,
             'percentiles': percentiles,
-            'stats': stats
+            'stats': stats,
+            'has_image_bytes': image_bytes_col is not None
         })
 
     except Exception as e:
@@ -477,25 +615,25 @@ def get_images():
     end = start + per_page
     page_df = filtered_df.iloc[start:end]
 
+    # Columns to skip during serialization (binary data)
+    skip_cols = set()
+    if dataset_state.get('image_bytes_column'):
+        skip_cols.add(dataset_state['image_bytes_column'])
+
     # Extract image data
     images = []
     for idx, row in page_df.iterrows():
         image_data = {'_index': int(idx)}
 
-        # Get all columns
+        # Get all columns (except binary data columns)
         for col in df.columns:
+            if col in skip_cols:
+                continue
             val = row[col]
-            # Check for NA - need to handle scalar vs array cases
-            # pd.isna on a list returns a list, so check isinstance first
-            if isinstance(val, (list, dict)):
-                image_data[col] = val
-            elif pd.isna(val) if np.isscalar(val) or val is None else False:
-                image_data[col] = None
-            elif isinstance(val, (np.integer, np.floating)):
-                image_data[col] = float(val) if isinstance(val, np.floating) else int(val)
-            else:
-                image_data[col] = str(val)
+            image_data[col] = _serialize_value(val)
 
+        # Remove None entries that signal skip (binary data)
+        image_data = {k: v for k, v in image_data.items() if v is not _SKIP_SENTINEL}
         images.append(image_data)
 
     return jsonify({
@@ -541,23 +679,24 @@ def get_filtered_out_images():
     end = start + per_page
     page_df = filtered_out_df.iloc[start:end]
 
+    # Columns to skip during serialization (binary data)
+    skip_cols = set()
+    if dataset_state.get('image_bytes_column'):
+        skip_cols.add(dataset_state['image_bytes_column'])
+
     # Extract image data
     images = []
     for idx, row in page_df.iterrows():
         image_data = {'_index': int(idx)}
 
-        # Get all columns
+        # Get all columns (except binary data columns)
         for col in df.columns:
+            if col in skip_cols:
+                continue
             val = row[col]
-            if isinstance(val, (list, dict)):
-                image_data[col] = val
-            elif pd.isna(val) if np.isscalar(val) or val is None else False:
-                image_data[col] = None
-            elif isinstance(val, (np.integer, np.floating)):
-                image_data[col] = float(val) if isinstance(val, np.floating) else int(val)
-            else:
-                image_data[col] = str(val)
+            image_data[col] = _serialize_value(val)
 
+        image_data = {k: v for k, v in image_data.items() if v is not _SKIP_SENTINEL}
         images.append(image_data)
 
     return jsonify({
@@ -586,6 +725,38 @@ def serve_image(image_path):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/image-bytes/<int:index>')
+def serve_image_bytes(index):
+    """Serve a binary image from the dataset's image_bytes column."""
+    if dataset_state['df'] is None:
+        return jsonify({'error': 'No dataset loaded'}), 400
+
+    if not dataset_state['has_image_bytes']:
+        return jsonify({'error': 'No binary image data in dataset'}), 400
+
+    df = dataset_state['df']
+    if index < 0 or index >= len(df):
+        return jsonify({'error': 'Index out of range'}), 404
+
+    col = dataset_state['image_bytes_column']
+    image_data = df.at[index, col] if index in df.index else df.iloc[index][col]
+
+    if image_data is None or (isinstance(image_data, float) and np.isnan(image_data)):
+        return jsonify({'error': 'No image data for this index'}), 404
+
+    # Extract raw bytes - handles both flat bytes and list<binary>/ndarray wrapping
+    raw_bytes = _extract_binary_element(image_data)
+    if raw_bytes is None:
+        return jsonify({'error': f'Could not extract image bytes (type: {type(image_data).__name__})'}), 500
+
+    mimetype = guess_image_mimetype(raw_bytes)
+    return send_file(
+        io.BytesIO(raw_bytes),
+        mimetype=mimetype,
+        download_name=f'image_{index}.{mimetype.split("/")[-1]}'
+    )
+
+
 @app.route('/api/sample/<int:index>')
 def get_sample(index):
     """Get detailed data for a specific sample."""
@@ -600,18 +771,18 @@ def get_sample(index):
     row = df.iloc[index]
     sample_data = {}
 
+    # Columns to skip during serialization (binary data)
+    skip_cols = set()
+    if dataset_state.get('image_bytes_column'):
+        skip_cols.add(dataset_state['image_bytes_column'])
+
     for col in df.columns:
+        if col in skip_cols:
+            continue
         val = row[col]
-        # Check for NA - need to handle scalar vs array cases
-        # pd.isna on a list returns a list, so check isinstance first
-        if isinstance(val, (list, dict)):
-            sample_data[col] = val
-        elif pd.isna(val) if np.isscalar(val) or val is None else False:
-            sample_data[col] = None
-        elif isinstance(val, (np.integer, np.floating)):
-            sample_data[col] = float(val) if isinstance(val, np.floating) else int(val)
-        else:
-            sample_data[col] = str(val)
+        serialized = _serialize_value(val)
+        if serialized is not _SKIP_SENTINEL:
+            sample_data[col] = serialized
 
     # Add percentile ranks for numeric columns
     percentile_ranks = {}
@@ -661,10 +832,21 @@ def export_filtered():
         })
 
     elif export_format == 'json':
-        # Return the filtered data as JSON
+        # Exclude binary columns from JSON export
+        export_df = filtered_df
+        if dataset_state.get('image_bytes_column'):
+            export_cols = [c for c in filtered_df.columns
+                           if c != dataset_state['image_bytes_column']]
+            export_df = filtered_df[export_cols]
+        # Convert ndarray values (from parquet list<T> columns) to Python lists
+        records = export_df.to_dict(orient='records')
+        for rec in records:
+            for k, v in rec.items():
+                if isinstance(v, np.ndarray):
+                    rec[k] = v.tolist()
         return jsonify({
-            'filtered_count': len(filtered_df),
-            'data': filtered_df.to_dict(orient='records')
+            'filtered_count': len(export_df),
+            'data': records
         })
 
     return jsonify({'error': 'Invalid export format'}), 400

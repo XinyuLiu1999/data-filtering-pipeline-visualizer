@@ -10,6 +10,7 @@ const state = {
     allColumns: [],
     imageColumn: null,
     idColumn: null,
+    hasImageBytes: false,  // Whether images are stored as binary data in the dataset
     percentiles: {},
     stats: {},
     filters: [],
@@ -58,6 +59,7 @@ async function loadDataset() {
         state.allColumns = data.all_columns;
         state.imageColumn = data.image_column;
         state.idColumn = data.id_column;
+        state.hasImageBytes = data.has_image_bytes || false;
         state.percentiles = data.percentiles;
         state.stats = data.stats;
         state.filteredCount = data.total_records;
@@ -846,11 +848,15 @@ function renderImageGrid(images, isFilteredOut = false) {
     }
 
     const html = images.map(img => {
-        // Get image path
-        let imagePath = '';
-        if (state.imageColumn && img[state.imageColumn]) {
+        // Get image source URL
+        let imgSrc = '';
+        if (state.hasImageBytes) {
+            // Binary image data: use the image-bytes endpoint with the row index
+            imgSrc = `/api/image-bytes/${img._index}`;
+        } else if (state.imageColumn && img[state.imageColumn]) {
             const imgVal = img[state.imageColumn];
-            imagePath = Array.isArray(imgVal) ? imgVal[0] : imgVal;
+            const imagePath = Array.isArray(imgVal) ? imgVal[0] : imgVal;
+            imgSrc = `/api/image${imagePath}`;
         }
 
         // Get ID
@@ -871,7 +877,7 @@ function renderImageGrid(images, isFilteredOut = false) {
         return `
             <div class="${cardClass}" onclick="openImageModal(${img._index})">
                 ${isFilteredOut ? '<div class="filtered-out-badge">Filtered Out</div>' : ''}
-                <img src="/api/image${imagePath}" alt="${id}" loading="lazy"
+                <img src="${imgSrc}" alt="${id}" loading="lazy"
                      onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22><rect fill=%22%23242a33%22 width=%22200%22 height=%22150%22/><text fill=%22%238b98a5%22 x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22>No Image</text></svg>'">
                 <div class="image-card-info">
                     <div class="image-card-id">ID: ${id}</div>
@@ -1010,12 +1016,16 @@ async function openImageModal(index) {
         }
 
         // Set image
-        let imagePath = '';
-        if (state.imageColumn && data[state.imageColumn]) {
-            const imgVal = data[state.imageColumn];
-            imagePath = Array.isArray(imgVal) ? imgVal[0] : imgVal;
+        if (state.hasImageBytes) {
+            document.getElementById('modal-image').src = `/api/image-bytes/${index}`;
+        } else {
+            let imagePath = '';
+            if (state.imageColumn && data[state.imageColumn]) {
+                const imgVal = data[state.imageColumn];
+                imagePath = Array.isArray(imgVal) ? imgVal[0] : imgVal;
+            }
+            document.getElementById('modal-image').src = `/api/image${imagePath}`;
         }
-        document.getElementById('modal-image').src = `/api/image${imagePath}`;
 
         // Metadata (non-numeric columns)
         const metadataHtml = state.allColumns
