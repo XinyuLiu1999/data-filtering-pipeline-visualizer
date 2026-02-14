@@ -32,7 +32,8 @@ dataset_state = {
     'stats': {},
     'has_image_bytes': False,       # Whether dataset has binary image data
     'image_bytes_column': None,     # Column name containing binary image data
-    'image_name_column': None       # Column name containing image names (for display)
+    'image_name_column': None,      # Column name containing image names (for display)
+    'stats_columns': None           # Column names sourced from JSONL stats file
 }
 
 
@@ -597,8 +598,8 @@ def load_dataset():
         # Detect numeric columns
         numeric_cols = detect_numeric_columns(df)
 
-        # For laioncoco, restrict numeric columns to only those from the stats file
-        if stats_columns is not None:
+        # For laioncoco with a stats file, restrict numeric columns to stats-sourced ones
+        if stats_columns:
             numeric_cols = [c for c in numeric_cols if c in stats_columns]
 
         # Compute percentiles and stats
@@ -611,6 +612,7 @@ def load_dataset():
         dataset_state['numeric_columns'] = numeric_cols
         dataset_state['percentiles'] = percentiles
         dataset_state['stats'] = stats
+        dataset_state['stats_columns'] = stats_columns
 
         # Detect image path column
         image_column = None
