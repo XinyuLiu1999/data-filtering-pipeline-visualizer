@@ -176,34 +176,35 @@ def load_laioncoco(parquet_path, jsonl_path, limit=None):
     if 'uid' in df_parquet.columns:
         result['uid'] = df_parquet['uid'].values
 
-    if is_schema_a:
-        # Schema A: parse clean_content JSON string to extract useful fields
-        parsed_fields = []
-        if 'clean_content' in df_parquet.columns:
-            for val in df_parquet['clean_content']:
-                if isinstance(val, str):
-                    try:
-                        parsed_fields.append(json.loads(val))
-                    except json.JSONDecodeError:
-                        parsed_fields.append({})
-                elif isinstance(val, dict):
-                    parsed_fields.append(val)
-                else:
+    # Parse clean_content JSON string to extract useful fields (both schemas)
+    useful_fields = ['text', 'origin_text', 'top_caption_sim', 'data_type',
+                     'width', 'height', 'url', 'pwatermark', 'punsafe']
+    parsed_fields = []
+    if 'clean_content' in df_parquet.columns:
+        for val in df_parquet['clean_content']:
+            if isinstance(val, str):
+                try:
+                    parsed_fields.append(json.loads(val))
+                except json.JSONDecodeError:
                     parsed_fields.append({})
+            elif isinstance(val, dict):
+                parsed_fields.append(val)
+            else:
+                parsed_fields.append({})
 
-        if parsed_fields:
-            content_df = pd.DataFrame(parsed_fields)
-            # Select useful fields (skip image_id_list as it's redundant)
-            useful_fields = ['text', 'origin_text', 'top_caption_sim', 'data_type',
-                             'width', 'height', 'url', 'pwatermark', 'punsafe']
-            for field in useful_fields:
-                if field in content_df.columns:
-                    result[field] = content_df[field].values
-    else:
-        # Schema B: copy top-level columns directly (skip binary/structural cols)
-        skip_cols = {'uid', 'image_bytes', 'images', 'image_buffer_list'}
+    if parsed_fields:
+        content_df = pd.DataFrame(parsed_fields)
+        # Skip image_id_list as it's redundant
+        for field in useful_fields:
+            if field in content_df.columns:
+                result[field] = content_df[field].values
+
+    if not is_schema_a:
+        # Schema B: copy remaining top-level columns not already covered
+        skip_cols = {'uid', 'image_bytes', 'images', 'image_buffer_list', 'clean_content'}
+        skip_cols.update(useful_fields)
         for col in df_parquet.columns:
-            if col not in skip_cols:
+            if col not in skip_cols and col not in result.columns:
                 result[col] = df_parquet[col].values
 
     # Add clip_score (Schema A needs explicit copy; Schema B already copied above)
