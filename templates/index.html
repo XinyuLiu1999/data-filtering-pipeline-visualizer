@@ -25,8 +25,19 @@
                 <section class="panel">
                     <h2>Load Dataset</h2>
                     <div class="form-group">
-                        <label for="file-path">File Path (JSONL/JSON/Parquet)</label>
+                        <label for="dataset-format">Dataset Format</label>
+                        <select id="dataset-format" onchange="onFormatChange()">
+                            <option value="default">Default (JSONL/JSON/Parquet)</option>
+                            <option value="laioncoco">LaionCOCO (Parquet + Stats JSONL)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="file-path" id="file-path-label">File Path (JSONL/JSON/Parquet)</label>
                         <input type="text" id="file-path" placeholder="/path/to/dataset.jsonl">
+                    </div>
+                    <div class="form-group" id="stats-path-group" style="display: none;">
+                        <label for="stats-path">Stats File Path (JSONL)</label>
+                        <input type="text" id="stats-path" placeholder="/path/to/stats.jsonl">
                     </div>
                     <div class="form-group">
                         <label for="record-limit">Record Limit (optional)</label>

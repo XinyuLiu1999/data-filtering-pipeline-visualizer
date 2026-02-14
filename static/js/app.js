@@ -27,8 +27,27 @@ const API_BASE = '';
 
 // ============== Data Loading ==============
 
+function onFormatChange() {
+    const format = document.getElementById('dataset-format').value;
+    const statsGroup = document.getElementById('stats-path-group');
+    const fileLabel = document.getElementById('file-path-label');
+    const fileInput = document.getElementById('file-path');
+
+    if (format === 'laioncoco') {
+        statsGroup.style.display = 'block';
+        fileLabel.textContent = 'Parquet File or Folder Path';
+        fileInput.placeholder = '/path/to/dataset.parquet or /path/to/parquet_dir/';
+    } else {
+        statsGroup.style.display = 'none';
+        fileLabel.textContent = 'File Path (JSONL/JSON/Parquet)';
+        fileInput.placeholder = '/path/to/dataset.jsonl';
+    }
+}
+
 async function loadDataset() {
+    const format = document.getElementById('dataset-format').value;
     const filePath = document.getElementById('file-path').value.trim();
+    const statsPath = document.getElementById('stats-path').value.trim();
     const limitInput = document.getElementById('record-limit').value;
     const limit = limitInput ? parseInt(limitInput) : null;
 
@@ -37,13 +56,23 @@ async function loadDataset() {
         return;
     }
 
+    if (format === 'laioncoco' && !statsPath) {
+        showStatus('load-status', 'Please enter a stats file path for LaionCOCO mode', 'error');
+        return;
+    }
+
     showStatus('load-status', 'Loading dataset...', '');
 
     try {
+        const payload = { file_path: filePath, limit, format };
+        if (format === 'laioncoco') {
+            payload.stats_path = statsPath;
+        }
+
         const response = await fetch(`${API_BASE}/api/load`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ file_path: filePath, limit })
+            body: JSON.stringify(payload)
         });
 
         const data = await response.json();

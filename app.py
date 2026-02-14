@@ -76,6 +76,133 @@ def load_parquet(file_path, limit=None):
     return df
 
 
+def load_laioncoco(parquet_path, jsonl_path, limit=None):
+    """Load laioncoco dataset from a parquet file (with binary images) and a JSONL stats file.
+
+    The parquet has columns: uid, clean_content (JSON string), clip_score,
+    image_buffer_list (list<struct<buffer: binary, image_id: string>>).
+
+    The JSONL has one JSON object per line with a __dj__stats__ key containing
+    metric dicts where values are single-element lists.
+
+    Returns (df, stats_columns) where:
+    - df: merged DataFrame with all data
+    - stats_columns: list of column names that came from the stats JSONL file
+    """
+    if limit is not None:
+        limit = int(limit)
+
+    # Load parquet - if path is a directory, collect all parquet files under it
+    if os.path.isdir(parquet_path):
+        import glob
+        parquet_files = sorted(glob.glob(os.path.join(parquet_path, '**', '*.parquet'), recursive=True))
+        if not parquet_files:
+            raise ValueError(f'No parquet files found under directory: {parquet_path}')
+        dfs = []
+        remaining = limit
+        for pf in parquet_files:
+            part = pd.read_parquet(pf)
+            if remaining is not None:
+                part = part.head(remaining)
+                remaining -= len(part)
+            dfs.append(part)
+            if remaining is not None and remaining <= 0:
+                break
+        df_parquet = pd.concat(dfs, ignore_index=True)
+    else:
+        df_parquet = pd.read_parquet(parquet_path)
+        if limit:
+            df_parquet = df_parquet.head(limit)
+
+    # Load JSONL stats (row-aligned with parquet)
+    stats_records = []
+    with open(jsonl_path, 'r', encoding='utf-8') as f:
+        for i, line in enumerate(f):
+            if limit and i >= limit:
+                break
+            if line.strip():
+                stats_records.append(json.loads(line))
+
+    # Extract binary image data from image_buffer_list
+    image_bytes_list = []
+    image_ids = []
+    if 'image_buffer_list' in df_parquet.columns:
+        for val in df_parquet['image_buffer_list']:
+            if val is not None and len(val) > 0:
+                item = val[0]
+                # Handle both dict-like and struct-like access
+                if isinstance(item, dict):
+                    image_bytes_list.append(item.get('buffer'))
+                    image_ids.append(item.get('image_id', ''))
+                else:
+                    # PyArrow struct converted to dict by pandas
+                    image_bytes_list.append(getattr(item, 'buffer', None) if hasattr(item, 'buffer') else item.get('buffer', None))
+                    image_ids.append(getattr(item, 'image_id', '') if hasattr(item, 'image_id') else item.get('image_id', ''))
+            else:
+                image_bytes_list.append(None)
+                image_ids.append('')
+
+    # Parse clean_content JSON string to extract useful fields
+    parsed_fields = []
+    if 'clean_content' in df_parquet.columns:
+        for val in df_parquet['clean_content']:
+            if isinstance(val, str):
+                try:
+                    parsed_fields.append(json.loads(val))
+                except json.JSONDecodeError:
+                    parsed_fields.append({})
+            elif isinstance(val, dict):
+                parsed_fields.append(val)
+            else:
+                parsed_fields.append({})
+
+    # Build the merged DataFrame
+    result = pd.DataFrame()
+
+    # Add uid
+    if 'uid' in df_parquet.columns:
+        result['uid'] = df_parquet['uid'].values
+
+    # Add parsed clean_content fields
+    if parsed_fields:
+        content_df = pd.DataFrame(parsed_fields)
+        # Select useful fields (skip image_id_list as it's redundant)
+        useful_fields = ['text', 'origin_text', 'top_caption_sim', 'data_type',
+                         'width', 'height', 'url', 'pwatermark', 'punsafe']
+        for field in useful_fields:
+            if field in content_df.columns:
+                result[field] = content_df[field].values
+
+    # Add clip_score
+    if 'clip_score' in df_parquet.columns:
+        result['clip_score'] = df_parquet['clip_score'].values
+
+    # Add binary image data as a column
+    if image_bytes_list:
+        result['image_bytes'] = image_bytes_list
+    if image_ids:
+        result['image_id'] = image_ids
+
+    # Flatten and merge JSONL stats, tracking which columns come from stats
+    stats_columns = set()
+    if stats_records:
+        for i, rec in enumerate(stats_records):
+            if i >= len(result):
+                break
+            dj_stats = rec.get('__dj__stats__', {})
+            for metric_name, metric_val in dj_stats.items():
+                stats_columns.add(metric_name)
+                if metric_name not in result.columns:
+                    result[metric_name] = np.nan
+                # Values are stored as single-element lists; extract the scalar
+                if isinstance(metric_val, list) and len(metric_val) > 0:
+                    result.at[i, metric_name] = float(metric_val[0])
+                elif isinstance(metric_val, (int, float)):
+                    result.at[i, metric_name] = float(metric_val)
+
+    return result, sorted(stats_columns)
+
+
 def _extract_binary_element(val):
     """Extract raw bytes from a value that may be bytes, or a list/ndarray of bytes.
 
@@ -134,7 +261,7 @@ def detect_image_bytes_column(df):
     # If we found an image_bytes column, look for image name column
     if image_bytes_col:
         name_candidates = ['images', 'image', 'image_name', 'img_name',
-                           'image_path', 'img_path', 'filename', 'file_name', 'name']
+                           'image_id', 'image_path', 'img_path', 'filename', 'file_name', 'name']
         for col in name_candidates:
             if col in df.columns and col != image_bytes_col:
                 image_name_col = col
@@ -399,6 +526,8 @@ def load_dataset():
     """Load a dataset from the filesystem."""
     data = request.json
     file_path = data.get('file_path')
+    stats_path = data.get('stats_path')  # JSONL stats file (for laioncoco mode)
+    dataset_format = data.get('format', 'default')  # 'default' or 'laioncoco'
     limit = data.get('limit')  # Optional limit for large files
 
     if not file_path:
@@ -407,10 +536,19 @@ def load_dataset():
     if not os.path.exists(file_path):
         return jsonify({'error': f'File not found: {file_path}'}), 404
 
+    if dataset_format == 'laioncoco':
+        if not stats_path:
+            return jsonify({'error': 'Stats file path is required for LaionCOCO format'}), 400
+        if not os.path.exists(stats_path):
+            return jsonify({'error': f'Stats file not found: {stats_path}'}), 404
+
     try:
         # Determine file type and load
         ext = Path(file_path).suffix.lower()
-        if ext == '.jsonl':
+        stats_columns = None  # Track stats-sourced columns for laioncoco
+        if dataset_format == 'laioncoco':
+            df, stats_columns = load_laioncoco(file_path, stats_path, limit)
+        elif ext == '.jsonl':
             df = load_jsonl(file_path, limit)
         elif ext == '.json':
             df = load_json(file_path, limit)
@@ -427,6 +565,10 @@ def load_dataset():
 
         # Detect numeric columns
         numeric_cols = detect_numeric_columns(df)
+
+        # For laioncoco, restrict numeric columns to only those from the stats file
+        if stats_columns is not None:
+            numeric_cols = [c for c in numeric_cols if c in stats_columns]
 
         # Compute percentiles and stats
         percentiles = compute_percentiles(df, numeric_cols)
