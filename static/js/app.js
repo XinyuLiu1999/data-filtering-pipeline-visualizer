@@ -56,16 +56,11 @@ async function loadDataset() {
         return;
     }
 
-    if (format === 'laioncoco' && !statsPath) {
-        showStatus('load-status', 'Please enter a stats file path for LaionCOCO mode', 'error');
-        return;
-    }
-
     showStatus('load-status', 'Loading dataset...', '');
 
     try {
         const payload = { file_path: filePath, limit, format };
-        if (format === 'laioncoco') {
+        if (format === 'laioncoco' && statsPath) {
             payload.stats_path = statsPath;
         }
 
