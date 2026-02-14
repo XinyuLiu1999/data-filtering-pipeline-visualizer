@@ -79,15 +79,22 @@ def load_parquet(file_path, limit=None):
 def load_laioncoco(parquet_path, jsonl_path, limit=None):
     """Load laioncoco dataset from a parquet file (with binary images) and a JSONL stats file.
 
-    The parquet has columns: uid, clean_content (JSON string), clip_score,
-    image_buffer_list (list<struct<buffer: binary, image_id: string>>).
+    Supports two parquet schemas:
+
+    Schema A (original):
+        uid, clean_content (JSON string), clip_score,
+        image_buffer_list (list<struct<buffer: binary, image_id: string>>)
+
+    Schema B (flat):
+        uid, clip_score, text, images (list<string>),
+        image_bytes (list<binary>), and other top-level columns
 
     The JSONL has one JSON object per line with a __dj__stats__ key containing
     metric dicts where values are single-element lists.
 
     Returns (df, stats_columns) where:
     - df: merged DataFrame with all data
-    - stats_columns: list of column names that came from the stats JSONL file
+    - stats_columns: list of column names that should be used for numeric filtering
     """
     if limit is not None:
         limit = int(limit)
@@ -123,10 +130,15 @@ def load_laioncoco(parquet_path, jsonl_path, limit=None):
             if line.strip():
                 stats_records.append(json.loads(line))
 
-    # Extract binary image data from image_buffer_list
+    # Detect schema: Schema A has image_buffer_list, Schema B has flat columns
+    is_schema_a = 'image_buffer_list' in df_parquet.columns
+
+    # Extract binary image data
     image_bytes_list = []
     image_ids = []
-    if 'image_buffer_list' in df_parquet.columns:
+
+    if is_schema_a:
+        # Schema A: extract from image_buffer_list (list<struct<buffer, image_id>>)
         for val in df_parquet['image_buffer_list']:
             if val is not None and len(val) > 0:
                 item = val[0]
@@ -141,20 +153,20 @@ def load_laioncoco(parquet_path, jsonl_path, limit=None):
             else:
                 image_bytes_list.append(None)
                 image_ids.append('')
-
-    # Parse clean_content JSON string to extract useful fields
-    parsed_fields = []
-    if 'clean_content' in df_parquet.columns:
-        for val in df_parquet['clean_content']:
-            if isinstance(val, str):
-                try:
-                    parsed_fields.append(json.loads(val))
-                except json.JSONDecodeError:
-                    parsed_fields.append({})
-            elif isinstance(val, dict):
-                parsed_fields.append(val)
-            else:
-                parsed_fields.append({})
+    else:
+        # Schema B: extract from flat image_bytes column (bytes or list<binary>)
+        if 'image_bytes' in df_parquet.columns:
+            for val in df_parquet['image_bytes']:
+                image_bytes_list.append(_extract_binary_element(val))
+        # Use images column for image IDs if available
+        if 'images' in df_parquet.columns:
+            for val in df_parquet['images']:
+                if isinstance(val, (list, np.ndarray)) and len(val) > 0:
+                    image_ids.append(val[0])
+                elif isinstance(val, str):
+                    image_ids.append(val)
+                else:
+                    image_ids.append('')
 
     # Build the merged DataFrame
     result = pd.DataFrame()
@@ -163,18 +175,38 @@ def load_laioncoco(parquet_path, jsonl_path, limit=None):
     if 'uid' in df_parquet.columns:
         result['uid'] = df_parquet['uid'].values
 
-    # Add parsed clean_content fields
-    if parsed_fields:
-        content_df = pd.DataFrame(parsed_fields)
-        # Select useful fields (skip image_id_list as it's redundant)
-        useful_fields = ['text', 'origin_text', 'top_caption_sim', 'data_type',
-                         'width', 'height', 'url', 'pwatermark', 'punsafe']
-        for field in useful_fields:
-            if field in content_df.columns:
-                result[field] = content_df[field].values
+    if is_schema_a:
+        # Schema A: parse clean_content JSON string to extract useful fields
+        parsed_fields = []
+        if 'clean_content' in df_parquet.columns:
+            for val in df_parquet['clean_content']:
+                if isinstance(val, str):
+                    try:
+                        parsed_fields.append(json.loads(val))
+                    except json.JSONDecodeError:
+                        parsed_fields.append({})
+                elif isinstance(val, dict):
+                    parsed_fields.append(val)
+                else:
+                    parsed_fields.append({})
 
-    # Add clip_score
-    if 'clip_score' in df_parquet.columns:
+        if parsed_fields:
+            content_df = pd.DataFrame(parsed_fields)
+            # Select useful fields (skip image_id_list as it's redundant)
+            useful_fields = ['text', 'origin_text', 'top_caption_sim', 'data_type',
+                             'width', 'height', 'url', 'pwatermark', 'punsafe']
+            for field in useful_fields:
+                if field in content_df.columns:
+                    result[field] = content_df[field].values
+    else:
+        # Schema B: copy top-level columns directly (skip binary/structural cols)
+        skip_cols = {'uid', 'image_bytes', 'images', 'image_buffer_list'}
+        for col in df_parquet.columns:
+            if col not in skip_cols:
+                result[col] = df_parquet[col].values
+
+    # Add clip_score (Schema A needs explicit copy; Schema B already copied above)
+    if is_schema_a and 'clip_score' in df_parquet.columns:
         result['clip_score'] = df_parquet['clip_score'].values
 
     # Add binary image data as a column
