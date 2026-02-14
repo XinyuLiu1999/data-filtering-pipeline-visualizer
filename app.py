@@ -121,14 +121,15 @@ def load_laioncoco(parquet_path, jsonl_path, limit=None):
         if limit:
             df_parquet = df_parquet.head(limit)
 
-    # Load JSONL stats (row-aligned with parquet)
+    # Load JSONL stats (row-aligned with parquet) if provided
     stats_records = []
-    with open(jsonl_path, 'r', encoding='utf-8') as f:
-        for i, line in enumerate(f):
-            if limit and i >= limit:
-                break
-            if line.strip():
-                stats_records.append(json.loads(line))
+    if jsonl_path:
+        with open(jsonl_path, 'r', encoding='utf-8') as f:
+            for i, line in enumerate(f):
+                if limit and i >= limit:
+                    break
+                if line.strip():
+                    stats_records.append(json.loads(line))
 
     # Detect schema: Schema A has image_buffer_list, Schema B has flat columns
     is_schema_a = 'image_buffer_list' in df_parquet.columns
@@ -569,9 +570,7 @@ def load_dataset():
         return jsonify({'error': f'File not found: {file_path}'}), 404
 
     if dataset_format == 'laioncoco':
-        if not stats_path:
-            return jsonify({'error': 'Stats file path is required for LaionCOCO format'}), 400
-        if not os.path.exists(stats_path):
+        if stats_path and not os.path.exists(stats_path):
             return jsonify({'error': f'Stats file not found: {stats_path}'}), 404
 
     try:
