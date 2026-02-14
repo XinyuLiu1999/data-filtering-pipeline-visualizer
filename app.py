@@ -202,7 +202,6 @@ def load_laioncoco(parquet_path, jsonl_path, limit=None):
     if not is_schema_a:
         # Schema B: copy remaining top-level columns not already covered
         skip_cols = {'uid', 'image_bytes', 'images', 'image_buffer_list', 'clean_content'}
-        skip_cols.update(useful_fields)
         for col in df_parquet.columns:
             if col not in skip_cols and col not in result.columns:
                 result[col] = df_parquet[col].values
