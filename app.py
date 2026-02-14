@@ -598,9 +598,10 @@ def load_dataset():
         # Detect numeric columns
         numeric_cols = detect_numeric_columns(df)
 
-        # For laioncoco with a stats file, restrict numeric columns to stats-sourced ones
-        if stats_columns:
-            numeric_cols = [c for c in numeric_cols if c in stats_columns]
+        # For laioncoco, restrict to only stats-sourced columns as metrics
+        # (including zero-variance ones that detect_numeric_columns would skip)
+        if stats_columns is not None:
+            numeric_cols = [c for c in stats_columns if c in df.columns]
 
         # Compute percentiles and stats
         percentiles = compute_percentiles(df, numeric_cols)
